@@ -1,0 +1,714 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no">
+<title>Teleprompter</title>
+<meta name="theme-color" content="#000000">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Prompter">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="apple-touch-icon" href="apple-touch-icon.png">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Crect width='100' height='100' rx='20' fill='%23111'/%3E%3Crect x='18' y='30' width='64' height='8' rx='4' fill='%23fff'/%3E%3Crect x='18' y='46' width='64' height='8' rx='4' fill='%23ffd23f'/%3E%3Crect x='18' y='62' width='44' height='8' rx='4' fill='%23fff'/%3E%3C/svg%3E">
+<style>
+  :root {
+    --fs: 48px;
+    --margin: 8vw;
+    --reading: 33%;
+    --bg: #000;
+    --fg: #f2f2f2;
+    --dim: #6d6d6d;
+    --accent: #ffd23f;
+    --safe-t: env(safe-area-inset-top, 0px);
+    --safe-b: env(safe-area-inset-bottom, 0px);
+    --safe-l: env(safe-area-inset-left, 0px);
+    --safe-r: env(safe-area-inset-right, 0px);
+  }
+  * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+  html, body { margin: 0; height: 100%; background: var(--bg); color: var(--fg);
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; }
+  body { overflow: hidden; overscroll-behavior: none; }
+  button, select, input { font: inherit; }
+  button { background: #222; color: #fff; border: 1px solid #3a3a3a; border-radius: 10px;
+    padding: 8px 12px; min-height: 40px; cursor: pointer; touch-action: manipulation; }
+  button:active { background: #333; }
+  button.on { background: var(--accent); color: #000; border-color: var(--accent); }
+  button.primary { background: #2a7cf7; border-color: #2a7cf7; }
+  .hidden { display: none !important; }
+
+  /* ---------- Edit mode ---------- */
+  #edit { position: fixed; inset: 0; display: flex; flex-direction: column;
+    padding: calc(10px + var(--safe-t)) calc(12px + var(--safe-r)) calc(10px + var(--safe-b)) calc(12px + var(--safe-l)); gap: 10px; }
+  #edit header { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+  #edit h1 { font-size: 20px; margin: 0 auto 0 0; }
+  #script { flex: 1; width: 100%; resize: none; background: #111; color: #eee; border: 1px solid #333;
+    border-radius: 12px; padding: 14px; font-size: 17px; line-height: 1.5; }
+  #edit .hint { font-size: 13px; color: #999; margin: 0; }
+  #help { background: #151515; border: 1px solid #333; border-radius: 12px; padding: 12px 14px;
+    font-size: 14px; line-height: 1.45; color: #ccc; max-height: 45vh; overflow: auto; }
+  #help h2 { font-size: 15px; margin: 0 0 6px; color: #fff; }
+  #help ul { margin: 4px 0 8px; padding-left: 20px; }
+  #help code, #help kbd { background: #262626; padding: 1px 5px; border-radius: 4px; }
+
+  /* ---------- Prompt mode ---------- */
+  #prompt { position: fixed; inset: 0; background: var(--bg); }
+  #stage { position: absolute; inset: 0; overflow: hidden; touch-action: none; }
+  #flip { position: absolute; inset: 0; transform-origin: 50% 50%; }
+  #content { position: absolute; left: 0; right: 0; top: 0; will-change: transform;
+    padding: 0 calc(var(--margin) + var(--safe-r)) 0 calc(var(--margin) + var(--safe-l));
+    font-size: var(--fs); line-height: 1.35; font-weight: 600; letter-spacing: .01em; }
+  #content p { margin: 0 0 .6em; }
+  #content .pad-top { height: var(--reading-px, 33vh); }
+  #content .pad-bot { height: 80vh; }
+  #content .w { transition: color .15s; border-radius: .15em; }
+  #content .w.past { color: var(--dim); }
+  #content .w.cur { color: #000; background: var(--accent); box-shadow: 0 0 0 .08em var(--accent); }
+  #content .cue { color: #5aa9ff; font-style: italic; font-weight: 400; }
+  #marker { position: absolute; left: 0; right: 0; top: var(--reading); height: 0; pointer-events: none; }
+  #marker::before, #marker::after { content: ""; position: absolute; top: -14px; border: 14px solid transparent; }
+  #marker::before { left: 0; border-left-color: var(--accent); border-left-width: 18px; }
+  #marker::after { right: 0; border-right-color: var(--accent); border-right-width: 18px; }
+  #marker .line { position: absolute; left: 24px; right: 24px; top: 0; border-top: 1px dashed rgba(255,210,63,.35); }
+  #marker.noline .line { display: none; }
+
+  #bar { position: absolute; left: 0; right: 0; top: 0; z-index: 5;
+    padding: calc(6px + var(--safe-t)) calc(8px + var(--safe-r)) 8px calc(8px + var(--safe-l));
+    background: linear-gradient(rgba(0,0,0,.92), rgba(0,0,0,.75)); display: flex; flex-wrap: wrap;
+    gap: 6px; align-items: center; transition: opacity .3s, transform .3s; font-size: 14px; }
+  #bar.autohide { opacity: 0; transform: translateY(-100%); pointer-events: none; }
+  #bar button { min-height: 38px; padding: 6px 10px; }
+  #bar label { display: inline-flex; align-items: center; gap: 4px; color: #ccc; }
+  #bar input[type=range] { width: 100px; accent-color: var(--accent); }
+  .grp { display: inline-flex; gap: 4px; align-items: center; background: #111; border-radius: 12px; padding: 3px; }
+  #play { min-width: 92px; font-weight: 700; }
+  #mic { display: inline-flex; align-items: center; gap: 6px; color: #ccc; padding: 0 6px; }
+  #mic .dot { width: 11px; height: 11px; border-radius: 50%; background: #555; }
+  #mic.listening .dot { background: #2ecc71; box-shadow: 0 0 8px #2ecc71; animation: pulse 1.2s infinite; }
+  #mic.starting .dot { background: #f1c40f; }
+  #mic.error .dot { background: #e74c3c; }
+  @keyframes pulse { 50% { opacity: .45; } }
+
+  #heard { position: absolute; left: 0; right: 0; bottom: 0; z-index: 4; pointer-events: none;
+    padding: 6px 12px calc(6px + var(--safe-b)); font-size: 13px; color: #8a8a8a; text-align: center;
+    background: linear-gradient(transparent, rgba(0,0,0,.85)); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  #msg { position: absolute; left: 50%; top: 50%; transform: translate(-50%,-50%); z-index: 6;
+    max-width: min(560px, 90vw); background: #1b1b1b; border: 1px solid #444; border-radius: 14px;
+    padding: 16px 18px; font-size: 15px; line-height: 1.45; color: #eee; box-shadow: 0 10px 40px #000; }
+  #msg .row { display: flex; gap: 8px; justify-content: flex-end; margin-top: 12px; flex-wrap: wrap; }
+  #tapResume { position: absolute; left: 50%; bottom: calc(40px + var(--safe-b)); transform: translateX(-50%);
+    z-index: 6; font-size: 17px; padding: 12px 18px; }
+  #showbar { position: absolute; right: calc(8px + var(--safe-r)); top: calc(8px + var(--safe-t)); z-index: 4;
+    opacity: .35; min-height: 36px; padding: 4px 10px; }
+  @media (max-width: 600px) {
+    #bar { gap: 4px; font-size: 13px; }
+    #bar button { padding: 4px 8px; min-height: 36px; }
+    #size, #marginWrap { display: none !important; }
+    #speed { width: 80px; }
+  }
+</style>
+</head>
+<body>
+
+<!-- ================= EDIT MODE ================= -->
+<section id="edit">
+  <header>
+    <h1>Teleprompter</h1>
+    <button id="helpBtn">Help</button>
+    <button id="sampleBtn">Sample</button>
+    <button id="clearBtn">Clear</button>
+    <button id="toPrompt" class="primary">Prompt ▶</button>
+  </header>
+  <textarea id="script" placeholder="Paste or type your script here…" spellcheck="true"></textarea>
+  <p class="hint">Saved automatically on this device. Blank line = new paragraph. Text in [square brackets] is shown as a cue and not read.</p>
+  <div id="help" class="hidden">
+    <h2>Voice-follow (scrolls as you talk)</h2>
+    <ul>
+      <li><b>iPhone/iPad:</b> use <b>Safari</b> (iOS 14.5+). Turn on <b>Settings → General → Keyboard → Enable Dictation</b> (and Siri if asked). Without it Safari reports “service not allowed”.</li>
+      <li>Tap <b>Start</b> — iOS only allows the mic after a tap. Allow microphone/speech access when asked.</li>
+      <li><b>Voice does not work when opened from the Home Screen icon</b> (Apple limitation for home-screen web apps). From the icon, use <b>Auto</b> scroll; for voice, open the page in Safari.</li>
+      <li>Needs an internet connection and an <b>https</b> (or localhost) address. Desktop: Chrome or Edge.</li>
+      <li>iOS stops listening every so often; the app restarts it automatically. If it can't, tap <b>Tap to resume listening</b>.</li>
+      <li>If it loses your place: tap any word to jump there, or drag the text.</li>
+    </ul>
+    <h2>Auto scroll</h2>
+    <ul><li>Switch mode to <b>Auto</b>, set speed, press Start. Drag the text to adjust.</li></ul>
+    <h2>Add to Home Screen</h2>
+    <ul><li>In Safari: Share → <b>Add to Home Screen</b>. Opens full-screen (Auto scroll only — see above).</li></ul>
+    <h2>Keyboard</h2>
+    <ul><li><kbd>Space</kbd> start/pause · <kbd>↑</kbd>/<kbd>↓</kbd> nudge · <kbd>M</kbd> mirror · <kbd>+</kbd>/<kbd>-</kbd> size · <kbd>R</kbd> back to top · <kbd>F</kbd> fullscreen · <kbd>Esc</kbd> exit fullscreen / back to edit · <kbd>H</kbd> show/hide controls</li></ul>
+  </div>
+</section>
+
+<!-- ================= PROMPT MODE ================= -->
+<section id="prompt" class="hidden">
+  <div id="stage">
+    <div id="flip">
+      <div id="content"></div>
+      <div id="marker"><div class="line"></div></div>
+    </div>
+  </div>
+  <div id="heard"></div>
+  <button id="showbar" class="hidden">⋯</button>
+  <div id="bar">
+    <button id="toEdit">✎ Edit</button>
+    <button id="play" class="primary">▶ Start</button>
+    <div class="grp">
+      <button id="modeVoice">🎤 Voice</button>
+      <button id="modeAuto">⇣ Auto</button>
+    </div>
+    <span id="mic"><span class="dot"></span><span id="micText">mic off</span></span>
+    <label id="speedWrap">Speed <input id="speed" type="range" min="5" max="300" step="5"><span id="speedVal"></span></label>
+    <div class="grp">
+      <button id="aMinus" title="Smaller (-)">A−</button>
+      <input id="size" type="range" min="20" max="140" step="2" title="Text size">
+      <button id="aPlus" title="Bigger (+)">A+</button>
+    </div>
+    <label id="marginWrap">Margin <input id="margin" type="range" min="0" max="30" step="1"></label>
+    <button id="mirrorX" title="Mirror horizontally (M)">⇋ Mirror</button>
+    <button id="mirrorY" title="Flip vertically">⇅ Flip</button>
+    <button id="resetBtn" title="Back to top (R)">⤒ Top</button>
+    <button id="fsBtn" title="Fullscreen (F)">⛶ Full</button>
+  </div>
+  <div id="msg" class="hidden"><div id="msgText"></div><div class="row"><button id="msgAuto">Use Auto scroll</button><button id="msgClose">OK</button></div></div>
+  <button id="tapResume" class="primary hidden">🎤 Tap to resume listening</button>
+</section>
+
+<!-- ================= MATCHER (pure, unit-testable in node) ================= -->
+<script id="matcher">
+var TPMatch = (function () {
+  var NUM = { zero:"0", one:"1", two:"2", three:"3", four:"4", five:"5", six:"6", seven:"7", eight:"8", nine:"9",
+    ten:"10", eleven:"11", twelve:"12", thirteen:"13", fourteen:"14", fifteen:"15", sixteen:"16",
+    seventeen:"17", eighteen:"18", nineteen:"19", twenty:"20", thirty:"30", forty:"40", fifty:"50",
+    hundred:"100", first:"1st", second:"2nd", third:"3rd" };
+  var STOP = {};
+  ("a an the and or but of to in on at for is it its im i you we he she they this that be are was were " +
+   "so as by with my our your me us do if not no uh um").split(" ").forEach(function (w) { STOP[w] = 1; });
+
+  // Normalize one raw token -> array of normalized tokens (may be 0..n)
+  function normWord(raw) {
+    var s = String(raw).toLowerCase()
+      .replace(/[\u2019\u2018']/g, "")      // don't -> dont
+      .replace(/&/g, " and ")
+      .replace(/%/g, " percent ")
+      .replace(/[\u2010-\u2015\-\/]+/g, " ") // hyphens, dashes, slashes split words
+      .replace(/[^a-z0-9\s]+/g, " ");       // strip other punctuation (accents removed below first)
+    return s.split(/\s+/).filter(Boolean).map(function (t) { return NUM[t] || t; });
+  }
+  function deaccent(s) { return s.normalize ? s.normalize("NFD").replace(/[\u0300-\u036f]/g, "") : s; }
+  function tokenize(text) {
+    var out = [];
+    deaccent(String(text)).split(/\s+/).forEach(function (w) { if (w) out.push.apply(out, normWord(w)); });
+    return out;
+  }
+
+  function lev(a, b) {
+    if (a === b) return 0;
+    var m = a.length, n = b.length, prev = [], cur = [], i, j;
+    for (j = 0; j <= n; j++) prev[j] = j;
+    for (i = 1; i <= m; i++) {
+      cur = [i];
+      for (j = 1; j <= n; j++)
+        cur[j] = Math.min(prev[j] + 1, cur[j - 1] + 1, prev[j - 1] + (a.charCodeAt(i - 1) === b.charCodeAt(j - 1) ? 0 : 1));
+      prev = cur;
+    }
+    return prev[n];
+  }
+  // similarity 0..1 between a spoken token and a script token
+  function sim(a, b) {
+    if (a === b) return 1;
+    if (!a || !b) return 0;
+    var L = Math.max(a.length, b.length);
+    if (Math.min(a.length, b.length) <= 3) return 0;                  // short words must be exact
+    // plural / tense variants: "word" vs "words", "walk" vs "walked"
+    if (a.length >= 4 && b.length >= 4 && (a.indexOf(b) === 0 || b.indexOf(a) === 0) && Math.abs(a.length - b.length) <= 3) return 0.8;
+    var d = lev(a, b), r = 1 - d / L;
+    if (L <= 4) return d <= 1 && a[0] === b[0] ? 0.6 : 0;
+    return r >= 0.7 ? r * 0.9 : 0;
+  }
+  function weight(t) { return STOP[t] ? 0.45 : 1; }
+
+  // Align spoken tail backwards against script ending at index j.
+  function alignBack(script, spoken, sEnd, j, maxSkip) {
+    var s0 = sim(spoken[sEnd], script[j]);
+    if (s0 <= 0) return null;
+    var score = s0 * weight(script[j]), matched = 1, strong = STOP[script[j]] ? 0 : 1, ti = j, misses = 0;
+    for (var si = sEnd - 1; si >= 0; si--) {
+      var best = 0, bestT = -1;
+      for (var t = ti - 1; t >= Math.max(0, ti - 1 - maxSkip); t--) {
+        var v = sim(spoken[si], script[t]);
+        if (v > 0) { v -= 0.12 * (ti - 1 - t); if (v > best) { best = v; bestT = t; } }
+      }
+      if (bestT >= 0) {
+        score += best * weight(script[bestT]); matched++; if (!STOP[script[bestT]]) strong++;
+        ti = bestT;
+      } else {
+        score -= 0.3; misses++; ti -= 1;   // assume a misheard substitution
+        if (ti < 0) break;
+      }
+    }
+    return { score: score, matched: matched, strong: strong, misses: misses };
+  }
+
+  /**
+   * Find the new position (index of last spoken script token).
+   * script: normalized tokens; spoken: normalized recognized tokens (most recent last)
+   * pos: current position (-1 = before start). Never moves backward.
+   * Returns { pos, moved, score }.
+   */
+  function advance(script, spoken, pos, opts) {
+    opts = opts || {};
+    var tail = opts.tail || 6, ahead = opts.ahead || 30, farAhead = opts.farAhead || 120, maxSkip = opts.maxSkip || 2;
+    var res = { pos: pos, moved: false, score: 0 };
+    if (!script.length || !spoken.length) return res;
+    var sp = spoken.slice(-tail);
+    var start = Math.max(0, pos), bestScore = -1e9, bestJ = -1;
+    var end = Math.min(script.length - 1, pos + farAhead);
+    for (var j = start; j <= end; j++) {
+      // allow the very last spoken word to be garbage (interim junk)
+      for (var drop = 0; drop <= 1 && drop < sp.length; drop++) {
+        var sEnd = sp.length - 1 - drop;
+        var a = alignBack(script, sp, sEnd, j, maxSkip);
+        if (!a) continue;
+        var dist = j - Math.max(pos, 0);
+        var near = dist <= ahead;
+        var ok;
+        if (sp.length === 1) ok = dist <= 3 && (a.strong >= 1 || dist <= 1);
+        else if (near) ok = (a.matched >= 2 && a.strong >= 1 && a.score >= 1.3) || (a.matched === 1 && a.strong === 1 && dist <= 2 && sEnd === 0)
+                 || (dist <= 3 && a.matched >= 2 && a.misses === 0 && a.score >= 0.85);
+        else ok = a.matched >= 4 && a.strong >= 3 && a.score >= 3.2 && a.misses <= 1;
+        if (!ok) continue;
+        var s = a.score - drop * 0.4 - dist * (near ? 0.03 : 0.05);
+        if (s > bestScore) { bestScore = s; bestJ = j; }
+      }
+    }
+    if (bestJ > pos) { res.pos = bestJ; res.moved = true; res.score = bestScore; }
+    else if (bestJ >= 0) res.score = bestScore;
+    return res;
+  }
+
+  return { tokenize: tokenize, normWord: normWord, sim: sim, advance: advance, lev: lev };
+})();
+if (typeof module !== "undefined" && module.exports) module.exports = TPMatch;
+</script>
+
+<!-- ================= APP ================= -->
+<script id="app">
+(function () {
+  "use strict";
+  var $ = function (id) { return document.getElementById(id); };
+  var LS = {
+    get: function (k, d) { try { var v = localStorage.getItem("tp." + k); return v === null ? d : JSON.parse(v); } catch (e) { return d; } },
+    set: function (k, v) { try { localStorage.setItem("tp." + k, JSON.stringify(v)); } catch (e) {} }
+  };
+  var SAMPLE = "Hey everyone, welcome back to the channel. Today I want to show you something simple that has made recording videos a lot easier for me.\n\n" +
+    "[smile, look at camera]\n\nThis is a teleprompter that listens to my voice and scrolls along as I talk. If I slow down, it waits for me. If I skip a few words, it catches up.\n\n" +
+    "You can paste any script, make the text bigger or smaller, and mirror it for teleprompter glass. It even works on an iPhone in Safari.\n\n" +
+    "If speech recognition is not available, there is a plain auto scroll mode with a speed slider. Press the space bar to pause and resume.\n\n" +
+    "That's it for today. Thanks for watching, and I'll see you in the next one.";
+
+  var state = {
+    script: LS.get("script", ""),
+    fs: LS.get("fs", window.innerWidth < 600 ? 36 : 48),
+    margin: LS.get("margin", window.innerWidth < 600 ? 4 : 8),
+    mirrorX: LS.get("mirrorX", false),
+    mirrorY: LS.get("mirrorY", false),
+    speed: LS.get("speed", 60),           // px per second (auto mode)
+    mode: LS.get("mode", "voice"),        // "voice" | "auto"
+    running: false,
+    offset: 0,          // current scroll offset (px of content above viewport top)
+    target: 0,          // target offset (voice mode)
+    pos: -1             // current token index
+  };
+
+  var SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+  var isStandalone = (window.navigator.standalone === true) ||
+    (window.matchMedia && window.matchMedia("(display-mode: standalone)").matches);
+  var isIOS = /iP(hone|ad|od)/.test(navigator.userAgent) || (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1);
+
+  // ---------- Edit mode ----------
+  var ta = $("script");
+  ta.value = state.script;
+  var saveT;
+  ta.addEventListener("input", function () {
+    clearTimeout(saveT);
+    saveT = setTimeout(function () { state.script = ta.value; LS.set("script", ta.value); }, 300);
+  });
+  $("sampleBtn").onclick = function () {
+    if (ta.value.trim() && !confirm("Replace current script with the sample?")) return;
+    ta.value = SAMPLE; state.script = SAMPLE; LS.set("script", SAMPLE);
+  };
+  $("clearBtn").onclick = function () {
+    if (!ta.value.trim() || confirm("Clear the script?")) { ta.value = ""; state.script = ""; LS.set("script", ""); ta.focus(); }
+  };
+  $("helpBtn").onclick = function () { $("help").classList.toggle("hidden"); };
+  $("toPrompt").onclick = enterPrompt;
+  $("toEdit").onclick = enterEdit;
+
+  // ---------- Build prompt content ----------
+  var tokens = [];     // normalized script tokens
+  var tokWord = [];    // token index -> word span element
+  var wordEls = [];
+  var wordFirstTok = []; // word index -> first token index
+  function build() {
+    var content = $("content");
+    content.innerHTML = "";
+    tokens = []; tokWord = []; wordEls = []; wordFirstTok = [];
+    var top = document.createElement("div"); top.className = "pad-top"; content.appendChild(top);
+    var text = state.script.trim() ? state.script : "(No script yet — tap ✎ Edit to add one.)";
+    var paras = text.replace(/\r/g, "").split(/\n\s*\n/);
+    paras.forEach(function (para) {
+      var p = document.createElement("p");
+      // split into cue [..] and normal segments
+      var parts = para.split(/(\[[^\]]*\])/);
+      parts.forEach(function (part) {
+        if (!part) return;
+        if (/^\[[^\]]*\]$/.test(part)) {
+          var c = document.createElement("span"); c.className = "cue"; c.textContent = part + " "; p.appendChild(c); return;
+        }
+        part.split(/(\s+)/).forEach(function (w) {
+          if (!w) return;
+          if (/^\s+$/.test(w)) { p.appendChild(document.createTextNode(w.indexOf("\n") >= 0 ? " " : w)); return; }
+          var span = document.createElement("span"); span.className = "w"; span.textContent = w;
+          var wi = wordEls.length; span.dataset.wi = wi; wordEls.push(span);
+          var tk = TPMatch.tokenize(w);
+          wordFirstTok[wi] = tokens.length;
+          tk.forEach(function (t) { tokens.push(t); tokWord.push(span); });
+          if (!tk.length) wordFirstTok[wi] = Math.max(0, tokens.length - 1);
+          p.appendChild(span);
+        });
+        p.appendChild(document.createTextNode(" "));
+      });
+      content.appendChild(p);
+    });
+    var bot = document.createElement("div"); bot.className = "pad-bot"; content.appendChild(bot);
+    layoutVars();
+  }
+
+  // ---------- Appearance ----------
+  function applyStyle() {
+    document.documentElement.style.setProperty("--fs", state.fs + "px");
+    document.documentElement.style.setProperty("--margin", state.margin + "vw");
+    $("size").value = state.fs; $("margin").value = state.margin;
+    $("speed").value = state.speed; $("speedVal").textContent = state.speed;
+    var sx = state.mirrorX ? -1 : 1, sy = state.mirrorY ? -1 : 1;
+    $("flip").style.transform = "scale(" + sx + "," + sy + ")";
+    $("mirrorX").classList.toggle("on", state.mirrorX);
+    $("mirrorY").classList.toggle("on", state.mirrorY);
+    $("modeVoice").classList.toggle("on", state.mode === "voice");
+    $("modeAuto").classList.toggle("on", state.mode === "auto");
+    $("speedWrap").classList.toggle("hidden", state.mode !== "auto");
+    $("mic").classList.toggle("hidden", state.mode !== "voice");
+    $("heard").classList.toggle("hidden", state.mode !== "voice");
+    layoutVars();
+  }
+  function layoutVars() {
+    var h = $("stage").clientHeight || window.innerHeight;
+    $("content").style.setProperty("--reading-px", Math.round(h * 0.33) + "px");
+  }
+  function setSize(v) {
+    var keepWord = currentWordEl();
+    state.fs = Math.max(20, Math.min(140, Math.round(v))); LS.set("fs", state.fs); applyStyle();
+    if (keepWord) { state.offset = state.target = targetFor(keepWord); render(); }
+  }
+  $("size").oninput = function () { setSize(+this.value); };
+  $("aMinus").onclick = function () { setSize(state.fs - 4); };
+  $("aPlus").onclick = function () { setSize(state.fs + 4); };
+  $("margin").oninput = function () { state.margin = +this.value; LS.set("margin", state.margin); applyStyle(); };
+  $("speed").oninput = function () { state.speed = +this.value; LS.set("speed", state.speed); $("speedVal").textContent = state.speed; };
+  $("mirrorX").onclick = toggleMirror;
+  $("mirrorY").onclick = function () { state.mirrorY = !state.mirrorY; LS.set("mirrorY", state.mirrorY); applyStyle(); };
+  function toggleMirror() { state.mirrorX = !state.mirrorX; LS.set("mirrorX", state.mirrorX); applyStyle(); }
+  $("modeVoice").onclick = function () { setMode("voice"); };
+  $("modeAuto").onclick = function () { setMode("auto"); };
+  function setMode(m) {
+    var was = state.running; if (was) stop();
+    state.mode = m; LS.set("mode", m); applyStyle();
+    if (m === "voice") checkVoiceSupport(false);
+  }
+
+  // ---------- Positioning ----------
+  function currentWordEl() { return state.pos >= 0 ? tokWord[state.pos] : null; }
+  function stageH() { return $("stage").clientHeight || window.innerHeight; }
+  function targetFor(el) {
+    // place the middle of the word's line on the reading line (33% from top)
+    return Math.max(0, el.offsetTop + el.offsetHeight / 2 - stageH() * 0.33);
+  }
+  var lastCur = null, pastUpTo = -1;
+  function highlight() {
+    var el = currentWordEl();
+    if (lastCur && lastCur !== el) lastCur.classList.remove("cur");
+    if (el) el.classList.add("cur");
+    lastCur = el;
+    var wi = el ? +el.dataset.wi : -1;
+    if (wi > pastUpTo) { for (var i = Math.max(0, pastUpTo); i < wi; i++) wordEls[i].classList.add("past"); }
+    else if (wi < pastUpTo) { for (var k = Math.max(0, wi); k <= pastUpTo && k < wordEls.length; k++) wordEls[k].classList.remove("past"); }
+    pastUpTo = wi;
+  }
+  function setPos(p, snap) {
+    state.pos = Math.max(-1, Math.min(tokens.length - 1, p));
+    highlight();
+    var el = currentWordEl();
+    state.target = el ? targetFor(el) : 0;
+    if (snap) state.offset = state.target;
+  }
+  function render() {
+    $("content").style.transform = "translate3d(0," + (-state.offset).toFixed(1) + "px,0)";
+  }
+  function maxOffset() { return Math.max(0, $("content").scrollHeight - stageH() * 0.5); }
+
+  // Word at the reading line (used when switching from auto -> voice, or after drag)
+  function posAtReadingLine() {
+    var y = state.offset + stageH() * 0.33, best = -1;
+    for (var i = 0; i < wordEls.length; i++) { if (wordEls[i].offsetTop + wordEls[i].offsetHeight > y) { best = i; break; } }
+    if (best < 0) return tokens.length - 1;
+    return wordFirstTok[best] - 1;
+  }
+
+  // ---------- Animation loop ----------
+  var lastT = 0;
+  function loop(t) {
+    var dt = lastT ? Math.min(0.1, (t - lastT) / 1000) : 0; lastT = t;
+    if (!dragging) {
+      if (state.mode === "auto" && state.running) {
+        state.offset = Math.min(maxOffset(), state.offset + state.speed * dt);
+        state.target = state.offset;
+      } else if (state.mode === "voice") {
+        var d = state.target - state.offset;
+        if (Math.abs(d) > 0.5) state.offset += d * Math.min(1, dt * 4); // smooth ease toward target
+      }
+    }
+    render();
+    requestAnimationFrame(loop);
+  }
+  requestAnimationFrame(loop);
+
+  // ---------- Touch / mouse: drag to scroll, tap word to jump, tap to show controls ----------
+  var dragging = false, dragY0 = 0, off0 = 0, moved = false;
+  var stage = $("stage");
+  function dirY() { return state.mirrorY ? -1 : 1; }
+  stage.addEventListener("pointerdown", function (e) { dragging = true; moved = false; dragY0 = e.clientY; off0 = state.offset; });
+  window.addEventListener("pointermove", function (e) {
+    if (!dragging) return;
+    var dy = (e.clientY - dragY0) * dirY();
+    if (Math.abs(dy) > 6) moved = true;
+    if (moved) { state.offset = Math.max(0, Math.min(maxOffset(), off0 - dy)); state.target = state.offset; }
+  });
+  window.addEventListener("pointerup", function (e) {
+    if (!dragging) return;
+    dragging = false;
+    if (moved) { if (state.mode === "voice") { state.pos = posAtReadingLine(); highlight(); } }
+    else {
+      var w = e.target && e.target.closest && e.target.closest(".w");
+      if (w && state.mode === "voice") setPos(wordFirstTok[+w.dataset.wi], false);
+      else if (w && state.mode === "auto") { state.offset = targetFor(w); state.target = state.offset; }
+      showBar();
+    }
+  });
+  stage.addEventListener("wheel", function (e) {
+    e.preventDefault();
+    state.offset = Math.max(0, Math.min(maxOffset(), state.offset + e.deltaY * dirY())); state.target = state.offset;
+    if (state.mode === "voice") { state.pos = posAtReadingLine(); highlight(); }
+  }, { passive: false });
+
+  function nudge(dir) {
+    if (state.mode === "voice") {
+      // move one line: find first word whose top differs from current
+      var el = currentWordEl(), wi = el ? +el.dataset.wi : -1;
+      var curTop = el ? el.offsetTop : -1, i = wi;
+      if (dir > 0) { while (i < wordEls.length - 1 && (i < 0 || wordEls[i].offsetTop <= curTop)) i++; }
+      else { while (i > 0 && wordEls[i].offsetTop >= curTop) i--; var lt = i >= 0 ? wordEls[i].offsetTop : 0; while (i > 0 && wordEls[i - 1].offsetTop === lt) i--; if (wi <= 0) i = -1; }
+      setPos(i < 0 ? -1 : wordFirstTok[i], false);
+    } else {
+      var lh = state.fs * 1.35;
+      state.offset = Math.max(0, Math.min(maxOffset(), state.offset + dir * lh)); state.target = state.offset;
+    }
+  }
+  function resetTop() { spoken = []; setPos(-1, true); state.offset = state.target = 0; }
+  $("resetBtn").onclick = resetTop;
+
+  // ---------- Controls auto-hide ----------
+  var hideT;
+  function showBar() {
+    $("bar").classList.remove("autohide"); $("showbar").classList.add("hidden");
+    clearTimeout(hideT);
+    if (state.running) hideT = setTimeout(function () { $("bar").classList.add("autohide"); $("showbar").classList.remove("hidden"); }, 3500);
+  }
+  $("bar").addEventListener("pointerdown", showBar);
+  $("showbar").onclick = showBar;
+
+  // ---------- Fullscreen ----------
+  var fsEl = document.documentElement;
+  var canFS = !!(fsEl.requestFullscreen || fsEl.webkitRequestFullscreen);
+  if (!canFS) $("fsBtn").classList.add("hidden");     // iPhone Safari: no element fullscreen; use Add to Home Screen
+  function isFS() { return !!(document.fullscreenElement || document.webkitFullscreenElement); }
+  function toggleFS() {
+    if (!canFS) return;
+    if (isFS()) (document.exitFullscreen || document.webkitExitFullscreen).call(document);
+    else (fsEl.requestFullscreen || fsEl.webkitRequestFullscreen).call(fsEl);
+  }
+  $("fsBtn").onclick = toggleFS;
+  document.addEventListener("fullscreenchange", function () { setTimeout(onResize, 100); });
+
+  // ---------- Wake lock (keep screen on) ----------
+  var wakeLock = null;
+  function lockScreen() { try { if (navigator.wakeLock) navigator.wakeLock.request("screen").then(function (l) { wakeLock = l; }).catch(function () {}); } catch (e) {} }
+  function unlockScreen() { try { if (wakeLock) wakeLock.release(); } catch (e) {} wakeLock = null; }
+
+  // ---------- Messages ----------
+  function showMsg(html, offerAuto) {
+    $("msgText").innerHTML = html; $("msgAuto").classList.toggle("hidden", !offerAuto); $("msg").classList.remove("hidden");
+  }
+  $("msgClose").onclick = function () { $("msg").classList.add("hidden"); };
+  $("msgAuto").onclick = function () { $("msg").classList.add("hidden"); setMode("auto"); };
+  function micStatus(cls, text) {
+    var m = $("mic"); m.className = cls || ""; if (state.mode !== "voice") m.classList.add("hidden");
+    $("micText").textContent = text;
+  }
+  function checkVoiceSupport(alertUser) {
+    var problem = null;
+    if (!SR) problem = "This browser doesn't support speech recognition. Use <b>Safari</b> on iPhone/iPad (iOS 14.5+) or <b>Chrome/Edge</b> on a computer. You can use <b>Auto</b> scroll instead.";
+    else if (!window.isSecureContext) problem = "Speech recognition needs a secure page (<b>https://</b> or <b>http://localhost</b>). You opened it from <code>" + location.protocol + "</code>. See README for how to serve it.";
+    else if (isIOS && isStandalone) problem = "Voice-follow doesn't work when opened from the <b>Home Screen icon</b> (Apple limitation). Open this page in <b>Safari</b> for voice, or use <b>Auto</b> scroll here.";
+    if (problem) { micStatus("error", SR ? "voice limited" : "no speech API"); if (alertUser) showMsg(problem, true); return false; }
+    micStatus("", "mic off"); return true;
+  }
+
+  // ---------- Speech recognition ----------
+  var rec = null, wantListening = false, spoken = [], restartFails = 0, lastStart = 0, restartTimer = null, permDenied = false;
+  function makeRec() {
+    var r = new SR();
+    r.continuous = true; r.interimResults = true; r.lang = "en-US"; r.maxAlternatives = 1;
+    r.onstart = function () { micStatus("listening", "listening"); $("tapResume").classList.add("hidden"); };
+    r.onresult = function (ev) {
+      // concatenate everything this session heard (final + interim), use the tail
+      var txt = "";
+      for (var i = 0; i < ev.results.length; i++) txt += " " + ev.results[i][0].transcript;
+      var words = TPMatch.tokenize(txt);
+      spoken = words.slice(-12);
+      $("heard").textContent = "heard: " + txt.trim().split(/\s+/).slice(-10).join(" ");
+      var r2 = TPMatch.advance(tokens, spoken, state.pos);
+      if (r2.moved) setPos(r2.pos, false);
+      restartFails = 0;
+    };
+    r.onerror = function (ev) {
+      var e = ev.error;
+      if (e === "no-speech" || e === "aborted") return;           // benign; onend will restart
+      if (e === "not-allowed" || e === "service-not-allowed") {
+        permDenied = true; wantListening = false; stop();
+        micStatus("error", "mic blocked");
+        showMsg(isIOS
+          ? "Microphone / speech access was blocked.<br>• Turn on <b>Settings → General → Keyboard → Enable Dictation</b> (and Siri if asked).<br>• Allow the microphone for this site: <b>aA</b> menu in the address bar → <b>Website Settings → Microphone → Allow</b>.<br>• Voice doesn't work from the Home Screen icon — open in Safari.<br>Then tap Start again."
+          : "Microphone access was denied. Click the mic/lock icon in the address bar, allow the microphone, then press Start again.", true);
+        return;
+      }
+      if (e === "network") { micStatus("error", "network error"); return; }
+      if (e === "audio-capture") { micStatus("error", "no microphone"); showMsg("No microphone was found or it's in use by another app.", true); wantListening = false; stop(); }
+    };
+    r.onend = function () {
+      if (!wantListening) { micStatus("", "mic off"); return; }
+      micStatus("starting", "restarting…");
+      // Chrome & iOS end sessions periodically: restart quickly; back off if it keeps failing
+      var quick = Date.now() - lastStart < 1000;
+      if (quick) restartFails++;
+      if (restartFails > 4) { micStatus("error", "stopped"); $("tapResume").classList.remove("hidden"); return; }
+      clearTimeout(restartTimer);
+      restartTimer = setTimeout(startRec, quick ? 400 * restartFails : 120);
+    };
+    return r;
+  }
+  function startRec() {
+    if (!wantListening) return;
+    try {
+      if (!rec) rec = makeRec();
+      spoken = []; lastStart = Date.now();
+      rec.start();
+      micStatus("starting", "starting…");
+    } catch (err) {
+      // InvalidStateError = already started; anything else on iOS usually means a tap is needed
+      if (err && err.name === "InvalidStateError") return;
+      micStatus("error", "tap to resume"); $("tapResume").classList.remove("hidden");
+    }
+  }
+  $("tapResume").onclick = function () { restartFails = 0; rec = null; wantListening = true; startRec(); };
+
+  // ---------- Start / stop ----------
+  function start() {
+    if (state.mode === "voice") {
+      if (!checkVoiceSupport(true)) return;
+      if (state.pos < 0 && state.offset > 5) state.pos = posAtReadingLine();
+      wantListening = true; restartFails = 0; permDenied = false; rec = null;
+      startRec(); // must be inside the tap handler for iOS
+    }
+    state.running = true; lockScreen();
+    $("play").textContent = "❚❚ Pause"; $("play").classList.remove("primary");
+    showBar();
+  }
+  function stop() {
+    state.running = false; wantListening = false; clearTimeout(restartTimer);
+    if (rec) { try { rec.abort(); } catch (e) {} }
+    if (state.mode === "voice" && !permDenied) micStatus("", "mic off");
+    $("tapResume").classList.add("hidden");
+    unlockScreen();
+    $("play").textContent = "▶ Start"; $("play").classList.add("primary");
+    showBar();
+  }
+  function togglePlay() { state.running ? stop() : start(); }
+  $("play").onclick = togglePlay;
+
+  // ---------- Mode switching ----------
+  function enterPrompt() {
+    state.script = ta.value; LS.set("script", ta.value);
+    $("edit").classList.add("hidden"); $("prompt").classList.remove("hidden");
+    build(); applyStyle(); pastUpTo = -1; lastCur = null; setPos(-1, true); state.offset = 0;
+    if (state.mode === "voice") checkVoiceSupport(false);
+    showBar();
+  }
+  function enterEdit() {
+    if (state.running) stop();
+    if (isFS()) toggleFS();
+    $("prompt").classList.add("hidden"); $("edit").classList.remove("hidden");
+  }
+
+  // ---------- Keyboard ----------
+  document.addEventListener("keydown", function (e) {
+    if ($("prompt").classList.contains("hidden")) return;   // typing in editor
+    if (e.target && /INPUT|TEXTAREA|SELECT/.test(e.target.tagName) && e.target.type !== "range") return;
+    var k = e.key;
+    if (k === " " || k === "Spacebar") { e.preventDefault(); togglePlay(); }
+    else if (k === "ArrowDown") { e.preventDefault(); nudge(1); }
+    else if (k === "ArrowUp") { e.preventDefault(); nudge(-1); }
+    else if (k === "m" || k === "M") toggleMirror();
+    else if (k === "+" || k === "=") setSize(state.fs + 4);
+    else if (k === "-" || k === "_") setSize(state.fs - 4);
+    else if (k === "r" || k === "R") resetTop();
+    else if (k === "f" || k === "F") toggleFS();
+    else if (k === "h" || k === "H") $("bar").classList.toggle("autohide");
+    else if (k === "Escape") { if (!isFS()) enterEdit(); }
+    else return;
+    showBar();
+  });
+
+  // ---------- Resize / visibility ----------
+  function onResize() {
+    layoutVars();
+    var el = currentWordEl();
+    if (el) { state.target = targetFor(el); state.offset = state.target; }
+  }
+  window.addEventListener("resize", onResize);
+  window.addEventListener("orientationchange", function () { setTimeout(onResize, 300); });
+  document.addEventListener("visibilitychange", function () {
+    if (document.hidden && state.running) stop();
+  });
+
+  // expose for testing
+  window.__tp = { state: state, start: start, stop: stop, setPos: setPos, nudge: nudge, setSize: setSize,
+    toggleMirror: toggleMirror, enterPrompt: enterPrompt, enterEdit: enterEdit, setMode: setMode, tokens: function () { return tokens; } };
+
+  applyStyle();
+  if (!state.script) { /* first run: show help so iPhone users see the Dictation note */ $("help").classList.remove("hidden"); }
+})();
+</script>
+</body>
+</html>

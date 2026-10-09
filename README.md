@@ -1,0 +1,36 @@
+# Teleprompter
+
+A single-file teleprompter (`teleprompter.html`) that scrolls along as you talk (voice-follow), with a plain auto-scroll fallback. No build step and no external dependencies. The only extra files are for "Add to Home Screen": `manifest.webmanifest`, `apple-touch-icon.png`, `icon-192.png`, `icon-512.png`, plus `index.html`, which just redirects to the app.
+
+## Run it locally (computer)
+```
+cd teleprompter
+python3 -m http.server 8000
+```
+Open **http://localhost:8000/teleprompter.html** in **Chrome or Edge**. Voice-follow needs a secure page (https or localhost). Opening the file with `file://` usually won't get mic access.
+
+## iPhone / iPad (Safari)
+- Voice-follow needs an **https** address, so host it (see below) or use a tunnel. A LAN `http://192.168…` address won't get the mic.
+- Use **Safari** on iOS 14.5 or later. Turn on **Settings → General → Keyboard → Enable Dictation** (and Siri if asked). Without it you get "service-not-allowed".
+- Tap **Start**. iOS only turns on the mic after a tap. Allow the microphone/speech prompts.
+- **Add to Home Screen** (Share → Add to Home Screen) gives you a full-screen icon. Apple doesn't let home-screen web apps use speech recognition, so from the icon only **Auto** scroll works. For voice, open the page in Safari.
+- The screen stays awake while prompting where the Wake Lock API is available (iOS 16.4+).
+
+## Using it
+- **Edit**: paste your script. It saves automatically to this browser (localStorage). A blank line starts a new paragraph. `[text in brackets]` shows as a cue and isn't read.
+- **Prompt → Voice**: highlights the current word and keeps it on the yellow reading line, about 1/3 down the screen. Tap any word to jump there, or drag the text.
+- **Prompt → Auto**: scrolls at a steady speed set by the slider.
+- Mirror (horizontal flip) and Flip (vertical) are for teleprompter glass. Text size, margin, speed, mirror and mode are all remembered.
+- Keys: `Space` start/pause · `↑/↓` nudge · `M` mirror · `+/-` size · `R` back to top · `F` fullscreen · `Esc` exit fullscreen / back to edit · `H` show/hide controls.
+
+## Hosting (free https)
+Everything is static, so any static host works.
+- **GitHub Pages** (recommended): put this folder in a repo, then Settings → Pages → deploy from branch. Open `https://<user>.github.io/<repo>/`.
+- **Firebase Hosting**: `firebase init hosting` with this folder as `public`, then `firebase deploy`.
+
+## Tests
+- `node test/matcher.test.js`: unit tests for the word-matching logic.
+- `python3 test/browser_test.py`: headless Chrome checks (render, mirror, size, auto scroll, persistence) and screenshots.
+
+## Note on icons
+The PNG icons are stored as base64 in `icons-b64/`. The `Decode icons` GitHub Action turns them into the real `*.png` files at the repo root (the repo was published through a text-only API).

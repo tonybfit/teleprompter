@@ -21,7 +21,8 @@ Open **http://localhost:8000/teleprompter.html** in **Chrome or Edge**. Voice-fo
 - **Prompt → Voice**: highlights the current word and keeps it on the yellow reading line, about 1/3 down the screen. Tap any word to jump there, or drag the text.
 - **Prompt → Auto**: scrolls at a steady speed set by the slider.
 - Mirror (horizontal flip) and Flip (vertical) are for teleprompter glass. Text size, margin, speed, mirror and mode are all remembered.
-- Keys: `Space` start/pause · `↑/↓` nudge · `M` mirror · `+/-` size · `R` back to top · `F` fullscreen · `Esc` exit fullscreen / back to edit · `H` show/hide controls.
+- **Reset** (always-visible button, bottom right): scrolls the script smoothly back to the top and clears voice-follow progress so you can do another take. If the mic is already listening, it keeps listening from the start of the script.
+- Keys: `Space` start/pause · `↑/↓` nudge · `M` mirror · `+/-` size · `R` or `Home` reset to the top · hold `↑` for 0.8s also resets (handy on a Bluetooth presentation remote) · `F` fullscreen · `Esc` exit fullscreen / back to edit · `H` show/hide controls. Remotes that send a **Home** or **Previous track** key also reset.
 
 ## Hosting (free https)
 Everything is static, so any static host works.

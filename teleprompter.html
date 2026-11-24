@@ -101,11 +101,28 @@
     z-index: 6; font-size: 17px; padding: 12px 18px; }
   #showbar { position: absolute; right: calc(8px + var(--safe-r)); top: calc(8px + var(--safe-t)); z-index: 4;
     opacity: .35; min-height: 36px; padding: 4px 10px; }
+  /* Always visible, unmirrored, easy to hit on a phone. Kept out of #flip so Mirror/Flip don't reverse the label. */
+  #resetBtn {
+    position: absolute;
+    right: calc(10px + var(--safe-r));
+    bottom: calc(14px + var(--safe-b));
+    z-index: 5;
+    min-height: 48px;
+    min-width: 92px;
+    padding: 10px 18px;
+    font-size: 16px;
+    font-weight: 700;
+    letter-spacing: .02em;
+    background: rgba(34,34,34,.92);
+    border: 1px solid #666;
+  }
+  #resetBtn:active { background: var(--accent); color: #000; border-color: var(--accent); }
   @media (max-width: 600px) {
     #bar { gap: 4px; font-size: 13px; }
     #bar button { padding: 4px 8px; min-height: 36px; }
     #size, #marginWrap { display: none !important; }
     #speed { width: 80px; }
+    #resetBtn { min-height: 52px; min-width: 100px; font-size: 17px; padding: 12px 20px; }
   }
 </style>
 </head>
@@ -132,12 +149,14 @@
       <li>iOS stops listening every so often; the app restarts it automatically. If it can't, tap <b>Tap to resume listening</b>.</li>
       <li>If it loses your place: tap any word to jump there, or drag the text.</li>
     </ul>
+    <h2>Another take</h2>
+    <ul><li>Tap <b>Reset</b> (bottom right) to scroll back to the top and start the script over. The mic keeps listening if it was already on. A Bluetooth remote can press <kbd>Home</kbd> or hold <kbd>↑</kbd>.</li></ul>
     <h2>Auto scroll</h2>
     <ul><li>Switch mode to <b>Auto</b>, set speed, press Start. Drag the text to adjust.</li></ul>
     <h2>Add to Home Screen</h2>
     <ul><li>In Safari: Share → <b>Add to Home Screen</b>. Opens full-screen (Auto scroll only — see above).</li></ul>
     <h2>Keyboard</h2>
-    <ul><li><kbd>Space</kbd> start/pause · <kbd>↑</kbd>/<kbd>↓</kbd> nudge · <kbd>M</kbd> mirror · <kbd>+</kbd>/<kbd>-</kbd> size · <kbd>R</kbd> back to top · <kbd>F</kbd> fullscreen · <kbd>Esc</kbd> exit fullscreen / back to edit · <kbd>H</kbd> show/hide controls</li></ul>
+    <ul><li><kbd>Space</kbd> start/pause · <kbd>↑</kbd>/<kbd>↓</kbd> nudge · <kbd>M</kbd> mirror · <kbd>+</kbd>/<kbd>-</kbd> size · <kbd>R</kbd> or <kbd>Home</kbd> reset to the top · hold <kbd>↑</kbd> (0.8s) also resets (Bluetooth remotes) · <kbd>F</kbd> fullscreen · <kbd>Esc</kbd> exit fullscreen / back to edit · <kbd>H</kbd> show/hide controls</li></ul>
   </div>
 </section>
 
@@ -168,9 +187,9 @@
     <label id="marginWrap">Margin <input id="margin" type="range" min="0" max="30" step="1"></label>
     <button id="mirrorX" title="Mirror horizontally (M)">⇋ Mirror</button>
     <button id="mirrorY" title="Flip vertically">⇅ Flip</button>
-    <button id="resetBtn" title="Back to top (R)">⤒ Top</button>
     <button id="fsBtn" title="Fullscreen (F)">⛶ Full</button>
   </div>
+  <button type="button" id="resetBtn" title="Back to the top for another take (R, Home, or hold Up)">Reset</button>
   <div id="msg" class="hidden"><div id="msgText"></div><div class="row"><button id="msgAuto">Use Auto scroll</button><button id="msgClose">OK</button></div></div>
   <button id="tapResume" class="primary hidden">🎤 Tap to resume listening</button>
 </section>
@@ -471,7 +490,11 @@ if (typeof module !== "undefined" && module.exports) module.exports = TPMatch;
   function loop(t) {
     var dt = lastT ? Math.min(0.1, (t - lastT) / 1000) : 0; lastT = t;
     if (!dragging) {
-      if (state.mode === "auto" && state.running) {
+      if (returningToTop) {
+        var rd = state.target - state.offset;
+        if (Math.abs(rd) > 1) state.offset += rd * Math.min(1, dt * 5);
+        else { state.offset = state.target; returningToTop = false; }
+      } else if (state.mode === "auto" && state.running) {
         state.offset = Math.min(maxOffset(), state.offset + state.speed * dt);
         state.target = state.offset;
       } else if (state.mode === "voice") {
@@ -493,7 +516,7 @@ if (typeof module !== "undefined" && module.exports) module.exports = TPMatch;
     if (!dragging) return;
     var dy = (e.clientY - dragY0) * dirY();
     if (Math.abs(dy) > 6) moved = true;
-    if (moved) { state.offset = Math.max(0, Math.min(maxOffset(), off0 - dy)); state.target = state.offset; }
+    if (moved) { returningToTop = false; state.offset = Math.max(0, Math.min(maxOffset(), off0 - dy)); state.target = state.offset; }
   });
   window.addEventListener("pointerup", function (e) {
     if (!dragging) return;
@@ -525,7 +548,24 @@ if (typeof module !== "undefined" && module.exports) module.exports = TPMatch;
       state.offset = Math.max(0, Math.min(maxOffset(), state.offset + dir * lh)); state.target = state.offset;
     }
   }
-  function resetTop() { spoken = []; setPos(-1, true); state.offset = state.target = 0; }
+  var returningToTop = false;
+  function resetTop() {
+    spoken = [];
+    $("heard").textContent = "";
+    setPos(-1, false);          // pos = -1, target = 0; highlight clears .cur / .past
+    state.target = 0;
+    returningToTop = true;      // animation loop eases offset back (Auto and Voice)
+    // If we're still listening, start a fresh recognizer so leftover words from the
+    // last take don't jump the script. Reset is a user tap, which iOS allows.
+    if (wantListening) {
+      recEpoch++;
+      clearTimeout(restartTimer);
+      if (rec) { try { rec.abort(); } catch (e) {} rec = null; }
+      restartFails = 0;
+      startRec();
+    }
+    showBar();
+  }
   $("resetBtn").onclick = resetTop;
 
   // ---------- Controls auto-hide ----------
@@ -576,12 +616,14 @@ if (typeof module !== "undefined" && module.exports) module.exports = TPMatch;
   }
 
   // ---------- Speech recognition ----------
-  var rec = null, wantListening = false, spoken = [], restartFails = 0, lastStart = 0, restartTimer = null, permDenied = false;
+  var rec = null, wantListening = false, spoken = [], restartFails = 0, lastStart = 0, restartTimer = null, permDenied = false, recEpoch = 0;
   function makeRec() {
     var r = new SR();
+    var epoch = recEpoch;
     r.continuous = true; r.interimResults = true; r.lang = "en-US"; r.maxAlternatives = 1;
-    r.onstart = function () { micStatus("listening", "listening"); $("tapResume").classList.add("hidden"); };
+    r.onstart = function () { if (epoch !== recEpoch) return; micStatus("listening", "listening"); $("tapResume").classList.add("hidden"); };
     r.onresult = function (ev) {
+      if (epoch !== recEpoch) return;
       // concatenate everything this session heard (final + interim), use the tail
       var txt = "";
       for (var i = 0; i < ev.results.length; i++) txt += " " + ev.results[i][0].transcript;
@@ -607,6 +649,7 @@ if (typeof module !== "undefined" && module.exports) module.exports = TPMatch;
       if (e === "audio-capture") { micStatus("error", "no microphone"); showMsg("No microphone was found or it's in use by another app.", true); wantListening = false; stop(); }
     };
     r.onend = function () {
+      if (epoch !== recEpoch) return;
       if (!wantListening) { micStatus("", "mic off"); return; }
       micStatus("starting", "restarting…");
       // Chrome & iOS end sessions periodically: restart quickly; back off if it keeps failing
@@ -638,7 +681,7 @@ if (typeof module !== "undefined" && module.exports) module.exports = TPMatch;
     if (state.mode === "voice") {
       if (!checkVoiceSupport(true)) return;
       if (state.pos < 0 && state.offset > 5) state.pos = posAtReadingLine();
-      wantListening = true; restartFails = 0; permDenied = false; rec = null;
+      wantListening = true; restartFails = 0; permDenied = false; rec = null; recEpoch++;
       startRec(); // must be inside the tap handler for iOS
     }
     state.running = true; lockScreen();
@@ -672,21 +715,38 @@ if (typeof module !== "undefined" && module.exports) module.exports = TPMatch;
   }
 
   // ---------- Keyboard ----------
+  // Bluetooth presentation remotes usually send arrow keys, and some send Home or Previous track.
+  // Short Up/Down still nudge one line; hold Up for 0.8s (or press Home / R) to reset for a new take.
+  var upHoldTimer = null;
   document.addEventListener("keydown", function (e) {
     if ($("prompt").classList.contains("hidden")) return;   // typing in editor
     if (e.target && /INPUT|TEXTAREA|SELECT/.test(e.target.tagName) && e.target.type !== "range") return;
     var k = e.key;
     if (k === " " || k === "Spacebar") { e.preventDefault(); togglePlay(); }
     else if (k === "ArrowDown") { e.preventDefault(); nudge(1); }
-    else if (k === "ArrowUp") { e.preventDefault(); nudge(-1); }
+    else if (k === "ArrowUp") {
+      e.preventDefault();
+      if (e.repeat) return;
+      if (upHoldTimer) clearTimeout(upHoldTimer);
+      upHoldTimer = setTimeout(function () { upHoldTimer = null; resetTop(); showBar(); }, 800);
+    }
     else if (k === "m" || k === "M") toggleMirror();
     else if (k === "+" || k === "=") setSize(state.fs + 4);
     else if (k === "-" || k === "_") setSize(state.fs - 4);
-    else if (k === "r" || k === "R") resetTop();
+    else if (k === "r" || k === "R" || k === "Home" || k === "MediaTrackPrevious") { e.preventDefault(); resetTop(); }
     else if (k === "f" || k === "F") toggleFS();
     else if (k === "h" || k === "H") $("bar").classList.toggle("autohide");
     else if (k === "Escape") { if (!isFS()) enterEdit(); }
     else return;
+    showBar();
+  });
+  document.addEventListener("keyup", function (e) {
+    if (e.key !== "ArrowUp") return;
+    if (!upHoldTimer) return;          // already fired reset, or no pending hold
+    clearTimeout(upHoldTimer);
+    upHoldTimer = null;
+    if ($("prompt").classList.contains("hidden")) return;
+    nudge(-1);
     showBar();
   });
 
@@ -704,7 +764,8 @@ if (typeof module !== "undefined" && module.exports) module.exports = TPMatch;
 
   // expose for testing
   window.__tp = { state: state, start: start, stop: stop, setPos: setPos, nudge: nudge, setSize: setSize,
-    toggleMirror: toggleMirror, enterPrompt: enterPrompt, enterEdit: enterEdit, setMode: setMode, tokens: function () { return tokens; } };
+    toggleMirror: toggleMirror, enterPrompt: enterPrompt, enterEdit: enterEdit, setMode: setMode, resetTop: resetTop,
+    tokens: function () { return tokens; } };
 
   applyStyle();
   if (!state.script) { /* first run: show help so iPhone users see the Dictation note */ $("help").classList.remove("hidden"); }

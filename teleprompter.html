@@ -552,18 +552,14 @@ if (typeof module !== "undefined" && module.exports) module.exports = TPMatch;
   function resetTop() {
     spoken = [];
     $("heard").textContent = "";
+    // Ignore everything already in this recognition session so leftover words
+    // from the last take don't jump the script. Do not abort/restart the mic:
+    // Safari (especially iOS, and from a Bluetooth remote with no tap) often
+    // cannot start webkitSpeechRecognition again after abort().
+    resultOffset = lastResultCount;
     setPos(-1, false);          // pos = -1, target = 0; highlight clears .cur / .past
     state.target = 0;
     returningToTop = true;      // animation loop eases offset back (Auto and Voice)
-    // If we're still listening, start a fresh recognizer so leftover words from the
-    // last take don't jump the script. Reset is a user tap, which iOS allows.
-    if (wantListening) {
-      recEpoch++;
-      clearTimeout(restartTimer);
-      if (rec) { try { rec.abort(); } catch (e) {} rec = null; }
-      restartFails = 0;
-      startRec();
-    }
     showBar();
   }
   $("resetBtn").onclick = resetTop;
@@ -617,6 +613,7 @@ if (typeof module !== "undefined" && module.exports) module.exports = TPMatch;
 
   // ---------- Speech recognition ----------
   var rec = null, wantListening = false, spoken = [], restartFails = 0, lastStart = 0, restartTimer = null, permDenied = false, recEpoch = 0;
+  var resultOffset = 0, lastResultCount = 0;
   function makeRec() {
     var r = new SR();
     var epoch = recEpoch;
@@ -624,9 +621,10 @@ if (typeof module !== "undefined" && module.exports) module.exports = TPMatch;
     r.onstart = function () { if (epoch !== recEpoch) return; micStatus("listening", "listening"); $("tapResume").classList.add("hidden"); };
     r.onresult = function (ev) {
       if (epoch !== recEpoch) return;
-      // concatenate everything this session heard (final + interim), use the tail
+      lastResultCount = ev.results.length;
+      // concatenate results from this take only (resultOffset skips the previous take)
       var txt = "";
-      for (var i = 0; i < ev.results.length; i++) txt += " " + ev.results[i][0].transcript;
+      for (var i = resultOffset; i < ev.results.length; i++) txt += " " + ev.results[i][0].transcript;
       var words = TPMatch.tokenize(txt);
       spoken = words.slice(-12);
       $("heard").textContent = "heard: " + txt.trim().split(/\s+/).slice(-10).join(" ");
@@ -665,7 +663,7 @@ if (typeof module !== "undefined" && module.exports) module.exports = TPMatch;
     if (!wantListening) return;
     try {
       if (!rec) rec = makeRec();
-      spoken = []; lastStart = Date.now();
+      spoken = []; resultOffset = 0; lastResultCount = 0; lastStart = Date.now();
       rec.start();
       micStatus("starting", "starting…");
     } catch (err) {
@@ -765,7 +763,10 @@ if (typeof module !== "undefined" && module.exports) module.exports = TPMatch;
   // expose for testing
   window.__tp = { state: state, start: start, stop: stop, setPos: setPos, nudge: nudge, setSize: setSize,
     toggleMirror: toggleMirror, enterPrompt: enterPrompt, enterEdit: enterEdit, setMode: setMode, resetTop: resetTop,
-    tokens: function () { return tokens; } };
+    tokens: function () { return tokens; },
+    _spoken: function () { return spoken.slice(); },
+    _resultOffset: function () { return resultOffset; },
+    _wantListening: function () { return wantListening; } };
 
   applyStyle();
   if (!state.script) { /* first run: show help so iPhone users see the Dictation note */ $("help").classList.remove("hidden"); }
